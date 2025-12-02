@@ -173,14 +173,102 @@ All Plaud API calls go to: `https://platform.plaud.ai`
 
 ## Git Workflow
 
-This project follows conventional commits:
+### Branching Strategy
+
+**Never commit directly to main/master.** Always use feature branches and pull requests.
+
+**Branch naming pattern:**
+```
+<type>/<short-description>
+```
+
+Examples:
+- `feat/oauth-token-caching`
+- `fix/rate-limiter-retry`
+- `docs/update-readme`
+
+### Commit Message Format
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Types:**
 - `feat:` - New features
 - `fix:` - Bug fixes
 - `docs:` - Documentation changes
-- `chore:` - Maintenance tasks
-- `refactor:` - Code refactoring
+- `style:` - Formatting (no logic changes)
+- `refactor:` - Code restructuring
+- `test:` - Test modifications
+- `chore:` - Build/tooling updates
 
-Example:
+**Body guidelines:**
+- Explain *what* and *why*, not *how*
+- Wrap at 72 characters
+- Separate from header by blank line
+
+**Footer options:**
+- Reference issues: `Closes #123`
+- Note breaking changes: `BREAKING CHANGE: description`
+- Add co-authors: `Co-Authored-By: Name <email>`
+
+### When to Commit
+
+Create commits at logical breakpoints:
+- One commit per complete, self-contained feature
+- After verifying changes build/test successfully (`npm run build && npm run lint`)
+- Before major refactoring work
+- Group related changes together
+
+**Don't wait until session end.** Create commits as you complete features for:
+- Easy rollback capability
+- Clear development history
+- Fresh context for commit messages
+
+### Grouping vs. Splitting Commits
+
+**Combine into one commit:**
+- Feature + its documentation
+- Configuration changes that work together
+- Single logical refactor across multiple files
+
+**Separate into different commits:**
+- Distinct, unrelated features
+- Bugfix + new feature
+- Substantial code changes + documentation updates
+- Rename operations + functionality changes
+
+### Pull Request Workflow
+
+Use `gh` CLI for GitHub operations:
+
 ```bash
-git commit -m "feat: add token caching for OAuth"
+# Create a feature branch
+git checkout -b feat/new-feature
+
+# Make changes, commit progressively
+git add -A && git commit -m "feat: add new feature"
+
+# Push and create PR
+git push -u origin feat/new-feature
+gh pr create --title "feat: add new feature" --body "Description of changes"
 ```
+
+**PR best practices:**
+- Use conventional commit format in titles
+- Include summary, test plan, breaking changes in body
+- Keep PRs focused and reviewable
+- Address feedback with additional commits
+
+### Red Flags to Avoid
+
+- Monolithic end-of-session commits
+- Committing untested code
+- Vague messages ("fix stuff", "wip", "updates")
+- Committing directly to main/master
