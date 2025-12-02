@@ -329,6 +329,29 @@ npm run lintfix  # Auto-fix issues
 3. In your n8n installation: `npm link n8n-nodes-plaud`
 4. Restart n8n
 
+### CI/CD
+
+This project uses GitHub Actions for continuous integration and automated releases:
+
+- **CI Workflow** (`.github/workflows/ci.yml`): Runs on all PRs and pushes to `main`. Validates code with lint and build checks on Node.js 20.x and 22.x.
+
+- **Publish Workflow** (`.github/workflows/publish.yml`): Triggered when a GitHub Release is published. Validates the release tag is semver-compatible, runs all checks, and publishes to npm.
+
+#### Creating a Release
+
+1. Ensure your changes are merged to `main`
+2. Update `package.json` version and `CHANGELOG.md`
+3. Create a GitHub Release with a semver tag (e.g., `v0.2.0`)
+4. The publish workflow will automatically validate and publish to npm
+
+#### Required Secrets
+
+For npm publishing, add the `NPM_TOKEN` secret to your repository:
+
+1. Generate an npm access token at [npmjs.com](https://www.npmjs.com/settings/~/tokens)
+2. Go to Repository Settings → Secrets and variables → Actions
+3. Add `NPM_TOKEN` with your npm access token
+
 ## Resources
 
 - [n8n Community Nodes Documentation](https://docs.n8n.io/integrations/community-nodes/)

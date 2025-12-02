@@ -1,0 +1,91 @@
+name: Release & Publish to npm
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  validate-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag is semver
+        run: |
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          # Check if tag matches semver pattern (v1.2.3 or 1.2.3)
+          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Error: Release tag '$TAG_NAME' is not a valid semver version"
+            echo "Expected format: v1.2.3 or 1.2.3 (with optional prerelease suffix)"
+            exit 1
+          fi
+          echo "Valid semver tag: $TAG_NAME"
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run build
+        run: npm run build
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          FULL_TAG_NAME="${{ github.event.release.tag_name }}"
+          # Remove leading 'v' if present
+          VERSION_NUMBER="${FULL_TAG_NAME#v}"
+          echo "VERSION=${VERSION_NUMBER}" >> $GITHUB_ENV
+          echo "Extracted version: ${VERSION_NUMBER}"
+
+      - name: Verify package.json version matches tag
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [ "$PACKAGE_VERSION" != "${{ env.VERSION }}" ]; then
+            echo "Warning: package.json version ($PACKAGE_VERSION) does not match tag version (${{ env.VERSION }})"
+            echo "Updating package.json to match release tag..."
+            npm version ${{ env.VERSION }} --no-git-tag-version --allow-same-version
+          else
+            echo "package.json version matches tag: $PACKAGE_VERSION"
+          fi
+
+      - name: Check if version already published
+        id: check_published
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          if npm view "${PACKAGE_NAME}@${{ env.VERSION }}" version > /dev/null 2>&1; then
+            echo "Version ${{ env.VERSION }} is already published to npm. Skipping publish."
+            echo "ALREADY_PUBLISHED=true" >> $GITHUB_ENV
+          else
+            echo "Version ${{ env.VERSION }} not yet published. Proceeding with publish."
+            echo "ALREADY_PUBLISHED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Publish to npm
+        if: env.ALREADY_PUBLISHED == 'false'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publication summary
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          if [ "${{ env.ALREADY_PUBLISHED }}" == "true" ]; then
+            echo "::notice::Package ${PACKAGE_NAME}@${{ env.VERSION }} was already published"
+          else
+            echo "::notice::Successfully published ${PACKAGE_NAME}@${{ env.VERSION }} to npm"
+          fi

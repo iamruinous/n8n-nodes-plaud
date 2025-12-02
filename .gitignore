@@ -6,3 +6,4 @@ dist/
 *.local
 COMMIT_MSG.txt
 COMMIT_MSG*.txt
+.direnv
