@@ -22,7 +22,10 @@ n8n-nodes-plaud/
 ├── nodes/
 │   └── Plaud/
 │       ├── Plaud.node.ts          # Main node implementation
+│       ├── PlaudTrigger.node.ts   # Webhook trigger node
 │       └── plaud.svg              # Node icon
+├── examples/
+│   └── task-detection-workflow.json  # Example workflow for @mention detection
 ├── dist/                          # Compiled JavaScript (generated)
 ├── package.json                   # npm package configuration
 ├── tsconfig.json                  # TypeScript configuration
@@ -53,14 +56,23 @@ The Plaud API uses a two-step OAuth flow:
 2. Exchange that for a short-lived API token (1 hour TTL)
 3. Use the API token for all subsequent requests
 
-Current implementation fetches a new token for each API call. Future optimization: cache the token for its TTL.
+Token caching is implemented with a 5-minute buffer before expiration to ensure smooth operation.
 
 ### Node Structure
 
-The node uses n8n's programmatic style with:
+The package includes two nodes:
+
+**Plaud (Regular Node)** - uses n8n's programmatic style with:
 - **Resources**: Device, File, Workflow
 - **Operations**: Multiple operations per resource
 - **Conditional UI**: `displayOptions` show/hide fields based on selected resource/operation
+- **Error Handling**: User-friendly messages with retry logic for rate limits
+- **Token Caching**: Automatic OAuth token caching with TTL management
+
+**PlaudTrigger (Trigger Node)** - webhook-based trigger:
+- Listens for `audio_transcribe.completed` or all events
+- Users must manually register the webhook URL in Plaud Developer Portal
+- Adds metadata (`_receivedAt`, `_eventType`) to incoming payloads
 
 ### API Base URL
 
@@ -68,10 +80,16 @@ All Plaud API calls go to: `https://platform.plaud.ai`
 
 ## Current Limitations
 
-1. **No token caching**: Each API call requests a new OAuth token
-2. **No webhook trigger**: Must use n8n's generic Webhook node to receive Plaud events
-3. **No file listing**: Cannot browse existing files/recordings via API (endpoint may not exist)
-4. **Manual S3 upload**: File upload requires separate HTTP Request nodes for S3 chunks
+1. **No file listing**: Cannot browse existing files/recordings via API (endpoint may not exist)
+2. **Manual S3 upload**: File upload requires separate HTTP Request nodes for S3 chunks
+3. **No programmatic webhook registration**: Plaud doesn't expose API for webhook management; users must register manually
+
+## Completed Features
+
+- **Token caching**: OAuth tokens are cached with TTL tracking and 5-minute refresh buffer
+- **Plaud Trigger Node**: Webhook trigger for `audio_transcribe.completed` events
+- **Error handling**: User-friendly error messages with automatic retry for rate limits (429)
+- **Example workflow**: Task detection workflow demonstrating @mention extraction (`examples/task-detection-workflow.json`)
 
 ## Next Steps for Development
 
@@ -82,39 +100,23 @@ All Plaud API calls go to: `https://platform.plaud.ai`
    - Test each operation with actual API responses
    - Document real response schemas
 
-2. **Add token caching**
-   ```typescript
-   // Store token with expiration
-   const tokenCache = new Map<string, { token: string; expires: number }>();
-   ```
-
-3. **Create example n8n workflow**
-   - Build a workflow that demonstrates the @Jade task detection use case
-   - Include webhook trigger → get result → parse for mentions → notify
-
 ### Medium Priority
 
-4. **Add Plaud Trigger Node**
-   - Create `PlaudTrigger.node.ts` for webhook events
-   - Handle `audio_transcribe.completed` event
-   - Auto-verify webhook signatures
-
-5. **Improve error handling**
-   - Map Plaud error codes to user-friendly messages
-   - Add retry logic for rate limits
-
-6. **Add file/recording listing**
+2. **Add file/recording listing**
    - Research if Plaud API has a list files endpoint
    - Enable browsing past recordings
 
+3. **Add webhook signature verification**
+   - If Plaud documents their signing method, implement verification in PlaudTrigger
+
 ### Low Priority
 
-7. **Unit tests**
+4. **Unit tests**
    - Mock HTTP requests
    - Test each operation
    - Test error handling
 
-8. **Submit for n8n verification**
+5. **Submit for n8n verification**
    - Follow [n8n verification process](https://docs.n8n.io/integrations/community-nodes/build-community-nodes/)
    - Ensure all linting passes with prepublish config
 
@@ -145,15 +147,15 @@ All Plaud API calls go to: `https://platform.plaud.ai`
 
 ## Tips for Next Session
 
-1. **Start by testing credentials**: The authentication flow is critical. Test with real Plaud credentials first.
+1. **Test with real Plaud account**: The authentication flow is critical. Test with real Plaud credentials first.
 
 2. **Check API response shapes**: The current implementation assumes response schemas. Verify against actual API responses.
 
 3. **The Plaud docs are incomplete**: Some endpoints return 404. The OpenAPI spec URL redirects. You may need to experiment with the API directly.
 
-4. **Consider rate limits**: Plaud has rate limits (not documented in detail). Implement backoff if needed.
+4. **Rate limits are handled**: Automatic retry with exponential backoff is implemented for 429 responses.
 
-5. **Token expiration**: Tokens expire in 3600 seconds (1 hour). Implement caching to avoid unnecessary token requests.
+5. **Token caching is implemented**: Tokens are cached with a 5-minute buffer before expiration.
 
 6. **Publishing to npm**:
    ```bash

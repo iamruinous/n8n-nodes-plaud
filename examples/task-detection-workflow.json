@@ -1,0 +1,189 @@
+{
+  "name": "Plaud Task Detection - Extract @mentions from Transcripts",
+  "nodes": [
+    {
+      "parameters": {
+        "event": "audio_transcribe.completed"
+      },
+      "id": "trigger-1",
+      "name": "Plaud Trigger",
+      "type": "n8n-nodes-plaud.plaudTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "plaud-webhook"
+    },
+    {
+      "parameters": {
+        "resource": "workflow",
+        "operation": "getResult",
+        "workflowId": "={{ $json.workflow_id }}"
+      },
+      "id": "get-result-1",
+      "name": "Get Workflow Result",
+      "type": "n8n-nodes-plaud.plaud",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "plaudApi": {
+          "id": "1",
+          "name": "Plaud API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract transcription text from Plaud workflow result\nconst result = $input.first().json;\n\n// Navigate to the transcription data\n// Structure may vary based on Plaud API response\nconst transcription = result.tasks?.find(t => t.type === 'transcription')?.result?.text \n  || result.transcription?.text\n  || result.result?.transcription\n  || '';\n\nif (!transcription) {\n  return [{ json: { error: 'No transcription found in result', raw: result } }];\n}\n\n// Define mention patterns to search for\n// Add your team members here\nconst mentionPatterns = [\n  { name: 'Jade', pattern: /@jade/gi },\n  { name: 'Jay', pattern: /@jay(?!den)/gi },  // Match @jay but not @jayden\n  { name: 'Jayden', pattern: /@jayden/gi },\n];\n\n// Find all mentions and their surrounding context\nconst mentions = [];\nconst sentences = transcription.split(/[.!?]+/);\n\nfor (const sentence of sentences) {\n  for (const { name, pattern } of mentionPatterns) {\n    if (pattern.test(sentence)) {\n      mentions.push({\n        assignee: name,\n        context: sentence.trim(),\n        timestamp: new Date().toISOString(),\n      });\n    }\n  }\n}\n\n// Also extract potential action items (sentences with action verbs)\nconst actionVerbs = /\\b(need to|should|must|will|please|todo|action item|follow up|remind|schedule|book|call|email|send|review|check|update|create|fix|implement)\\b/gi;\n\nconst actionItems = sentences\n  .filter(s => actionVerbs.test(s))\n  .map(s => ({\n    type: 'action_item',\n    text: s.trim(),\n    timestamp: new Date().toISOString(),\n  }));\n\nreturn [{\n  json: {\n    workflowId: result.workflow_id || result.id,\n    totalMentions: mentions.length,\n    totalActionItems: actionItems.length,\n    mentions,\n    actionItems,\n    rawTranscription: transcription,\n  }\n}];"
+      },
+      "id": "code-1",
+      "name": "Extract Tasks & Mentions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $json.totalMentions }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "if-1",
+      "name": "Has Mentions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json.mentions }}",
+        "options": {}
+      },
+      "id": "split-1",
+      "name": "Split Mentions",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "content": "## Plaud Task Detection Workflow\n\nThis workflow demonstrates how to:\n\n1. **Receive webhook events** from Plaud when transcriptions complete\n2. **Fetch the full result** using the workflow ID\n3. **Parse the transcription** to find @mentions and action items\n4. **Route notifications** based on who was mentioned\n\n### Setup Instructions\n\n1. Configure your Plaud API credentials\n2. Copy the webhook URL from the Plaud Trigger node\n3. Register the webhook URL in your [Plaud Developer Portal](https://platform.plaud.ai)\n4. Customize the mention patterns in the Code node\n5. Add notification nodes (Slack, Email, etc.) after the split\n\n### Customization\n\nEdit the `mentionPatterns` array in the Code node to match your team:\n\n```javascript\nconst mentionPatterns = [\n  { name: 'Alice', pattern: /@alice/gi },\n  { name: 'Bob', pattern: /@bob/gi },\n];\n```",
+        "height": 520,
+        "width": 380
+      },
+      "id": "note-1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-100, 140]
+    },
+    {
+      "parameters": {
+        "content": "### Add Your Notifications Here\n\nConnect Slack, Email, or other notification nodes to alert team members when they're mentioned.\n\nExample Slack message:\n```\nNew task from meeting!\nAssignee: {{ $json.assignee }}\nContext: {{ $json.context }}\n```",
+        "height": 220,
+        "width": 300
+      },
+      "id": "note-2",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1340, 100]
+    },
+    {
+      "parameters": {},
+      "id": "noop-1",
+      "name": "No Mentions",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1120, 400]
+    }
+  ],
+  "connections": {
+    "Plaud Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Workflow Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Workflow Result": {
+      "main": [
+        [
+          {
+            "node": "Extract Tasks & Mentions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Tasks & Mentions": {
+      "main": [
+        [
+          {
+            "node": "Has Mentions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Mentions?": {
+      "main": [
+        [
+          {
+            "node": "Split Mentions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Mentions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "plaud",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "task-detection",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -10,6 +10,18 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError } from 'n8n-workflow';
 
+// Token cache with expiration tracking
+// Key format: "clientId:secretKey" -> { token, expiresAt }
+interface CachedToken {
+	token: string;
+	expiresAt: number;
+}
+
+const tokenCache = new Map<string, CachedToken>();
+
+// Buffer time in milliseconds to refresh token before it expires (5 minutes)
+const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
 export class Plaud implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Plaud',
@@ -528,32 +540,133 @@ export class Plaud implements INodeType {
 	}
 }
 
+// Map Plaud API error codes to user-friendly messages
+function getErrorMessage(statusCode: number, errorBody?: IDataObject): string {
+	const errorCode = errorBody?.code as string | undefined;
+	const errorMessage = errorBody?.message as string | undefined;
+
+	// Handle specific Plaud error codes if available
+	if (errorCode) {
+		const knownErrors: Record<string, string> = {
+			INVALID_CREDENTIALS: 'Invalid API credentials. Please check your Client ID and Secret Key.',
+			TOKEN_EXPIRED: 'API token has expired. Please try again.',
+			DEVICE_NOT_FOUND: 'The specified device was not found.',
+			DEVICE_ALREADY_BOUND: 'This device is already bound to a user account.',
+			WORKFLOW_NOT_FOUND: 'The specified workflow was not found.',
+			RATE_LIMIT_EXCEEDED: 'Rate limit exceeded. Please wait before making more requests.',
+			INVALID_FILE_TYPE: 'The specified file type is not supported.',
+			FILE_TOO_LARGE: 'The file exceeds the maximum allowed size.',
+		};
+
+		if (knownErrors[errorCode]) {
+			return knownErrors[errorCode];
+		}
+	}
+
+	// Handle HTTP status codes
+	switch (statusCode) {
+		case 400:
+			return errorMessage || 'Bad request. Please check your input parameters.';
+		case 401:
+			return 'Authentication failed. Please verify your Plaud API credentials.';
+		case 403:
+			return 'Access denied. You do not have permission to perform this action.';
+		case 404:
+			return errorMessage || 'The requested resource was not found.';
+		case 429:
+			return 'Too many requests. Please wait before making more API calls.';
+		case 500:
+			return 'Plaud API server error. Please try again later.';
+		case 502:
+		case 503:
+		case 504:
+			return 'Plaud API is temporarily unavailable. Please try again later.';
+		default:
+			return errorMessage || `Request failed with status code ${statusCode}`;
+	}
+}
+
+// Sleep utility for retry delays
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getApiToken(
+	context: IExecuteFunctions,
+	clientId: string,
+	secretKey: string,
+): Promise<string> {
+	const cacheKey = `${clientId}:${secretKey}`;
+	const now = Date.now();
+
+	// Check if we have a valid cached token
+	const cached = tokenCache.get(cacheKey);
+	if (cached && cached.expiresAt > now + TOKEN_REFRESH_BUFFER_MS) {
+		return cached.token;
+	}
+
+	// Fetch a new token
+	const authString = Buffer.from(`${clientId}:${secretKey}`).toString('base64');
+
+	try {
+		const tokenResponse = await context.helpers.httpRequest({
+			method: 'POST',
+			url: 'https://platform.plaud.ai/api/oauth/api-token',
+			headers: {
+				Authorization: `Bearer ${authString}`,
+				'Content-Type': 'application/json',
+			},
+			json: true,
+		});
+
+		const apiToken = tokenResponse.api_token as string;
+		if (!apiToken) {
+			throw new Error('No API token returned from Plaud. Please verify your credentials.');
+		}
+
+		// Plaud tokens expire in 3600 seconds (1 hour)
+		const expiresInMs = ((tokenResponse.expires_in as number) || 3600) * 1000;
+
+		// Cache the token
+		tokenCache.set(cacheKey, {
+			token: apiToken,
+			expiresAt: now + expiresInMs,
+		});
+
+		return apiToken;
+	} catch (error) {
+		// Clear any cached token on auth failure
+		tokenCache.delete(cacheKey);
+
+		if (error instanceof Error) {
+			// Check if it's an HTTP error with status code
+			const httpError = error as Error & { statusCode?: number; response?: { body?: IDataObject } };
+			if (httpError.statusCode === 401) {
+				throw new Error(
+					'Authentication failed. Please verify your Plaud API Client ID and Secret Key in the credentials.',
+				);
+			}
+		}
+		throw error;
+	}
+}
+
 async function plaudApiRequest(
 	this: IExecuteFunctions,
 	method: IHttpRequestMethods,
 	endpoint: string,
 	body?: IDataObject,
+	retryCount = 0,
 ): Promise<IDataObject | IDataObject[]> {
+	const MAX_RETRIES = 3;
 	const credentials = await this.getCredentials('plaudApi');
+	const clientId = credentials.clientId as string;
+	const secretKey = credentials.secretKey as string;
 
-	// First, get an API token
-	const authString = Buffer.from(
-		`${credentials.clientId}:${credentials.secretKey}`,
-	).toString('base64');
+	// Get API token (from cache or fresh)
+	const apiToken = await getApiToken(this, clientId, secretKey);
 
-	const tokenResponse = await this.helpers.httpRequest({
-		method: 'POST',
-		url: 'https://platform.plaud.ai/api/oauth/api-token',
-		headers: {
-			Authorization: `Bearer ${authString}`,
-			'Content-Type': 'application/json',
-		},
-		json: true,
-	});
-
-	const apiToken = tokenResponse.api_token;
-
-	// Now make the actual API request with the token
+	// Make the actual API request with the token
 	const options: IHttpRequestOptions = {
 		method,
 		url: `https://platform.plaud.ai${endpoint}`,
@@ -568,5 +681,36 @@ async function plaudApiRequest(
 		options.body = body;
 	}
 
-	return this.helpers.httpRequest(options);
+	try {
+		return await this.helpers.httpRequest(options);
+	} catch (error) {
+		const httpError = error as Error & {
+			statusCode?: number;
+			response?: { body?: IDataObject };
+		};
+		const statusCode = httpError.statusCode;
+		const responseBody = httpError.response?.body;
+
+		// Handle rate limiting with exponential backoff
+		if (statusCode === 429 && retryCount < MAX_RETRIES) {
+			const delayMs = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+			await sleep(delayMs);
+			return plaudApiRequest.call(this, method, endpoint, body, retryCount + 1);
+		}
+
+		// Handle token expiration - clear cache and retry once
+		if (statusCode === 401 && retryCount < 1) {
+			const cacheKey = `${clientId}:${secretKey}`;
+			tokenCache.delete(cacheKey);
+			return plaudApiRequest.call(this, method, endpoint, body, retryCount + 1);
+		}
+
+		// Throw user-friendly error
+		if (statusCode) {
+			const friendlyMessage = getErrorMessage(statusCode, responseBody);
+			throw new Error(friendlyMessage);
+		}
+
+		throw error;
+	}
 }

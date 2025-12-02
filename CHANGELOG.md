@@ -8,11 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Webhook trigger node for receiving Plaud events directly
 - File listing operation to browse uploaded recordings
 - Batch workflow submission for multiple files
-- Token caching to reduce API calls
-- Trigger node for new recording notifications
+- Webhook signature verification (when Plaud documents signing method)
+
+## [0.2.0] - 2024-12-01
+
+### Added
+- **Plaud Trigger Node**: New webhook-based trigger node for receiving Plaud events
+  - Supports `audio_transcribe.completed` event or all events
+  - Adds metadata (`_receivedAt`, `_eventType`) to incoming payloads
+  - Users must manually register webhook URL in Plaud Developer Portal
+- **Token Caching**: OAuth tokens are now cached with TTL tracking
+  - 5-minute buffer before expiration ensures smooth token refresh
+  - Reduces unnecessary API calls for repeated operations
+- **Improved Error Handling**:
+  - User-friendly error messages for common HTTP status codes
+  - Automatic retry with exponential backoff for rate limits (429)
+  - Automatic token refresh on 401 authentication errors
+  - Maps Plaud-specific error codes to helpful messages
+- **Example Workflow**: Added `examples/task-detection-workflow.json`
+  - Demonstrates @mention extraction from transcriptions
+  - Shows end-to-end webhook → get result → parse → notify flow
+
+### Changed
+- Refactored `plaudApiRequest` function to support retry logic
+- Updated lint scripts to use glob patterns for better file matching
 
 ## [0.1.0] - 2024-12-01
 
@@ -44,11 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Future Roadmap
 
-### v0.2.0 (Planned)
-- [ ] Add Plaud Webhook Trigger node
-- [ ] Implement token caching (tokens valid for 1 hour)
-- [ ] Add retry logic for transient failures
-
 ### v0.3.0 (Planned)
 - [ ] Add file listing operation
 - [ ] Support for custom AI summary templates
@@ -61,5 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/iamruinous/n8n-nodes-plaud/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/iamruinous/n8n-nodes-plaud/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/iamruinous/n8n-nodes-plaud/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/iamruinous/n8n-nodes-plaud/releases/tag/v0.1.0

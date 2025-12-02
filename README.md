@@ -47,6 +47,15 @@ Add to your n8n Dockerfile:
 RUN cd /usr/local/lib/node_modules/n8n && npm install n8n-nodes-plaud
 ```
 
+## Nodes
+
+This package includes two nodes:
+
+| Node | Type | Description |
+|------|------|-------------|
+| **Plaud** | Regular | Interact with the Plaud API (devices, files, workflows) |
+| **Plaud Trigger** | Trigger | Receive webhook events when transcriptions complete |
+
 ## Operations
 
 ### Device
@@ -176,16 +185,27 @@ Complete flow for processing an audio file:
    - Operation: Get Result
    - Workflow ID: `{{ $json.id }}`
 
-### Example 3: Webhook-Triggered Processing
+### Example 3: Webhook-Triggered Processing with Plaud Trigger
 
-Listen for Plaud webhooks when transcription completes:
+Use the **Plaud Trigger** node to listen for transcription completion events:
 
 ```
-[Webhook Trigger (audio_transcribe.completed)]
+[Plaud Trigger (audio_transcribe.completed)]
     → [Plaud: Get Result]
-    → [IF: Contains @mention]
+    → [Code: Extract @mentions]
+    → [IF: Has Mentions?]
     → [Slack: Send Notification]
 ```
+
+**Setup:**
+
+1. Add the **Plaud Trigger** node to your workflow
+2. Select the event type (`audio_transcribe.completed` or `All Events`)
+3. Copy the webhook URL from the node
+4. Register the webhook URL in your [Plaud Developer Portal](https://platform.plaud.ai)
+5. Activate the workflow
+
+An example workflow demonstrating task detection from @mentions is available in `examples/task-detection-workflow.json`.
 
 ## API Reference
 
